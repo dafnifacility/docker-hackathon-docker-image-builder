@@ -8,6 +8,6 @@ jobs:
       - name: Kaniko build
         uses: aevea/action-kaniko@master
         with:
-		  registry: ghcr.io
-		  password: ${{ secrets.GITHUB_TOKEN }}
-		  image: example
+          registry: ghcr.io
+          password: ${{ secrets.GITHUB_TOKEN }}
+          image: example
