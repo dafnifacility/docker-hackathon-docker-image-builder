@@ -3,17 +3,67 @@ kind: Workflow
 metadata:
   labels:
     nims/workflowName: test-workflow
-  name: docker-hackathon-rose-3
+  name: docker-hackathon-rose-5
   namespace: dafni-nims-workflow-staging
 spec:
   entrypoint: dag
   serviceAccountName: nims-workflow-staging
   templates:
   - container:
+      args:
+      - '{{inputs.parameters.dataset-version-uid}}'
+      - '{{inputs.parameters.volume-path}}'
+      command:
+      - python
+      - dataretrieval.py
+      env:
+      - name: NID_URL
+        value: https://dafni-nid-api.staging.dafni.rl.ac.uk/nid
+      - name: VOLUME_MOUNT_PATH
+        value: /data/
+      - name: USER_TOKEN
+        value: 4de68c3b-4db0-450e-8e11-85a627ce1a7f
+      - name: KEYCLOAK_ENDPOINT
+        value: https://keycloak.staging.dafni.rl.ac.uk/auth/
+      - name: KEYCLOAK_REALM
+        value: Staging
+      - name: KEYCLOAK_CLIENT
+        value: dafni-main
+      - name: KEYCLOAK_CLIENT_SECRET
+        value: '"55f54120-ed4f-46e9-9c1c-db4cc719f937"'
+      - name: KEYCLOAK_USERNAME
+        value: dafni-service-account
+      - name: KEYCLOAK_PASSWORD
+        value: .dqiDbnu9Kpvw7cYZAQRC8cFEae6pJ
+      image: reg.dafni.rl.ac.uk/dafni/nims/management-container/staging
+      resources:
+        limits:
+          cpu: '16'
+          ephemeral-storage: 50Gi
+          memory: 128Gi
+        requests:
+          cpu: 200m
+          ephemeral-storage: 10Gi
+          memory: 128Mi
+      volumeMounts:
+      - mountPath: /data/
+        name: shared-workflow-volume
+    daemon: false
+    inputs:
+      parameters:
+      - name: dataset-version-uid
+      - name: volume-path
+    metadata:
+      labels:
+        nims/stepId: data-retrieval-step
+        nims/userId: 1d26cdb8-cb61-4ae6-b819-892a969bdb96
+        nims/workflowId: 231f6527-c802-4027-be0b-33497334b08f
+    name: data-retrieval-step
+  - container:
       image: quay.io/ukhomeofficedigital/vault-sidekick
       args:
         - -logtostderr
-        - -ca-cert=/etc/vault/ca.crt
+        - -ca-cert=/data/vault-ca.crt
         - -cn=secret:secret/data/harbor/modelbuild-hack:file=/kaniko/config,fmt=json
       env:
       - name: VAULT_ADDR
@@ -27,6 +77,8 @@ spec:
       volumeMounts:
       - name: kaniko-secret
         mountPath: /kaniko
+      - mountPath: /data/
+        name: shared-workflow-volume
     name: vault-sidekick
   - container:
       image: gcr.io/kaniko-project/executor:latest
@@ -72,7 +124,16 @@ spec:
     name: gitsync
   - dag:
       tasks:
-      - dependencies: []
+      - arguments:
+          parameters:
+          - name: dataset-version-uid
+            value: e7da63b9-4737-4528-a19b-958d65b7562b
+          - name: volume-path
+            value: '["/data"]'
+        dependencies: []
+        name: dataretrieval
+        template: data-retrieval-step
+      - dependencies: [dataretrieval]
         name: vault
         template: vault-sidekick
       - dependencies: [vault]
