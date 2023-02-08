@@ -1,0 +1,103 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  labels:
+    nims/workflowName: test-workflow
+  name: docker-hackathon-rose-3
+  namespace: dafni-nims-workflow-staging
+spec:
+  entrypoint: dag
+  serviceAccountName: nims-workflow-staging
+  templates:
+  - container:
+      image: quay.io/ukhomeofficedigital/vault-sidekick
+      args:
+        - -logtostderr
+        - -ca-cert=/etc/vault/ca.crt
+        - -cn=secret:secret/data/harbor/modelbuild-hack:file=/kaniko/config,fmt=json
+      env:
+      - name: VAULT_ADDR
+        value: https://vault.vault.svc.cluster.local:8200
+      - name: VAULT_OUTPUT
+        value: /secrets
+      - name: VAULT_SIDEKICK_ROLE
+        value: modelbuild
+      - name: VAULT_AUTH_METHOD
+        value: kubernetes
+      volumeMounts:
+      - name: kaniko-secret
+        mountPath: /kaniko
+    name: vault-sidekick
+  - container:
+      image: gcr.io/kaniko-project/executor:latest
+      imagePullPolicy: IfNotPresent
+      args: 
+        - --dockerfile=/workspace/Dockerfile
+        - --context=dir://workspace
+        - --destination=docker-hackathon-docker-image-builder/rose
+      resources:
+        limits:
+          cpu: '16'
+          ephemeral-storage: 50Gi
+          memory: 128Gi
+        requests:
+          cpu: '2'
+          ephemeral-storage: 10Gi
+          memory: 32Gi
+      volumeMounts:
+      - mountPath: /data/
+        name: shared-workflow-volume
+      - name: kaniko-secret
+        mountPath: /kaniko/.docker
+    name: dockerbuild
+  - container:
+      image: registry.k8s.io/git-sync/git-sync:v3.6.4
+      imagePullPolicy: IfNotPresent
+      args: 
+        - --one-time=true
+        - --repo=https://github.com/dafnifacility/dafni-example-models.git
+        - --dest=/data
+      resources:
+        limits:
+          cpu: '16'
+          ephemeral-storage: 50Gi
+          memory: 128Gi
+        requests:
+          cpu: '2'
+          ephemeral-storage: 10Gi
+          memory: 32Gi
+      volumeMounts:
+      - mountPath: /data/
+        name: shared-workflow-volume
+    name: gitsync
+  - dag:
+      tasks:
+      - dependencies: []
+        name: vault
+        template: vault-sidekick
+      - dependencies: [vault]
+        name: gitsync
+        template: gitsync
+      - dependencies: [gitsync]
+        name: dockerbuild
+        template: dockerbuild
+    name: dag
+  volumeClaimTemplates:
+  - metadata:
+      name: shared-workflow-volume
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 128Gi
+      storageClassName: nfs-client
+  - metadata:
+      name: kaniko-secret
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: nfs-client
